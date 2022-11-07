@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content"><channel><title>christopherthiebaut.com</title><description>Chris Thiebaut's blog</description><link>http://christopherthiebaut.com</link><language>en</language><lastBuildDate>Wed, 25 Aug 2021 20:13:00 -0400</lastBuildDate><pubDate>Wed, 25 Aug 2021 20:13:00 -0400</pubDate><ttl>250</ttl><atom:link href="http://christopherthiebaut.com/feed.rss" rel="self" type="application/rss+xml"/><item><guid isPermaLink="true">http://christopherthiebaut.com/posts/weak_delegate_capture_list_gotcha</guid><title>Tip: How to avoid unexpected behavior when capturing Optionals</title><description>Tip: How to avoid unexpected behavior when capturing `Optional`s</description><link>http://christopherthiebaut.com/posts/weak_delegate_capture_list_gotcha</link><pubDate>Wed, 25 Aug 2021 20:00:00 -0400</pubDate><content:encoded><![CDATA[<h1>Tip: How to avoid unexpected behavior when capturing <code>Optional</code>s</h1><p>Swift's <code>Optional</code> type is one of the defining features of the language. Given the amount of language features and syntactic sugar that are built around <code>Optional</code>, it is easy to forget that there even is such a type.<br><br>Normally, it's a good thing for a language feature to get out of your way. But when it comes to closure capture lists, it's important to remember that an optional is a value type regardless of what the wrapped type is.</p><p>Consider the following example code:</p><pre><code>class ExampleViewController: UIViewController {
+    weak var delegate: ExampleViewControllerDelegate?
+}
+</code></pre><p>It is easy to look at the above code and think of <code>delegate</code> as being an <code>ExampleViewControllerDelegate</code> which may or may not be present. But that thinking will lead you astray if you try to need to use an optional in a closure capture list. Expanding on the previous example (assuming it was executed in a Playground):</p><pre><code>class ExampleViewControllerDelegate {
+    var delegateMethodCalled = false
+    
+    func delegateMethod() {
+        delegateMethodCalled = true
+    }
+}
+
+class ExampleViewController : UIViewController {
+    weak var delegate: ExampleViewControllerDelegate?
+    
+    override func viewDidLoad() {
+        viewDidLoad()
+        URLSession.shared.dataTask(with: exampleURL) { [delegate] _, _, _ in
+            delegate?.delegateMethod()
+        }.resume()
+    }
+}
+
+let vc = ExampleViewController()
+_ = vc.view
+let delegate = ExampleViewControllerDelegate()
+vc.delegate = delegate
+
+print(delegate.delegateMethodCalled)
+</code></pre><p>What do we suppose will happen when the code above executes? Surely the delegate will be set <em>before</em> the <code>URLSession</code> callback is called. So intuitively, we'd expect it to print <code>true</code>. But that's because we're thinking about <code>delegate</code> as a reference type when it's actually a value type.</p><p>When the closure is created, <code>delegate</code> is <code>nil</code> so we actually capture the enum case <code>Optional&lt;ExampleViewControllerDelegate&gt;.none</code>. Since enums are value types, this will not get updated when the view controller's delegate gets set.</p><p>The simplest way to avoid bugs like that would be to use an actual reference type in your capture lists if you're expecting the closure to have the latest value when it is called. In the case of your example, that would be:</p><pre><code>    override func viewDidLoad() {
+        viewDidLoad()
+        URLSession.shared.dataTask(with: exampleURL) { [weak self] _, _, _ in
+            self?.delegate?.delegateMethod()
+        }.resume()
+    }
+</code></pre>]]></content:encoded></item><item><guid isPermaLink="true">http://christopherthiebaut.com/posts/exclude_swiftui_previews_from_code_coverage</guid><title>How to exclude SwiftUI Previews From Code Coverage Percentage</title><description>How to exclude SwiftUI Previews From Code Coverage Percentage</description><link>http://christopherthiebaut.com/posts/exclude_swiftui_previews_from_code_coverage</link><pubDate>Mon, 25 Jan 2021 14:07:00 -0500</pubDate><content:encoded><![CDATA[<h1>How to exclude SwiftUI Previews From Code Coverage Percentage</h1><p>TL;DR: Create a new scheme and compiler flag for your tests.</p><h2>THE PROBLEM:</h2><p>SwiftUI previews are great and can give you fantastic iteration speed when changing your app’s views. But what about the test coverage that gives you a high level of confidence to iterate quickly on your app itself? While you can test SwiftUI views <a href="https://nalexn.github.io/swiftui-unit-testing/">by digging into their internals</a> (not recommended as those tests may break in future SwiftUI versions) or with high level XCUI tests, you should not spend time unit testing SwiftUI previews because they’re not part of your app’s code.</p><p>The fact that SwiftUI previews generally are defined inline in the file with the view is great for development speed, but starts to become a problem if you use Xcode’s code coverage reports to track and ensure that you’re maintaining a high level of test coverage for your project. SwiftUI Previews show up as uncovered code, and suddenly you no longer expect to see code coverage reported at or near 100% and it becomes easier to let code coverage slip for actual production code. Alternatively, you may waste time digging in to find what code is uncovered — and repeatedly find out that it’s just previews instead of “real” code.</p><h2>THE SOLUTION:</h2><p>Fortunately, there’s a solution and it’s quick and easy. We just have to create a new build configuration for our tests that does not build the previews. So we start of with something like this:</p><img src="http://christopherthiebaut.com/low_test_coverage.png" alt="image of a project with 79.5% test coverage"/><p>Since this (relatively simple) app was created with TDD, the reported test coverage is relatively good, but deceptively low due to SwiftUI previews.</p><p>To create a new configuration, go to the <code>Info</code> tab of your project settings and duplicate the <code>Debug</code> configuration.</p><img src="http://christopherthiebaut.com/duplicate_debug_configuration.gif" alt="GIF showing duplicating the debug configuration"/><p>Believe it or not, you’re already almost done. Next, we need to add an active compilation condition (a compiler flag to go along with the new scheme.</p><img src="http://christopherthiebaut.com/create_active_compilation_condition.gif" alt="GIF showing creating an active compilation condition"/><p>Now, set the new build configuration as the configuration for your tests:</p><img src="http://christopherthiebaut.com/set_build_configuration_for_tests.gif" alt="GIF showing how to set build configuration for tests"/><p>At this point, all you have left to do is surround your SwiftUI previews with the same <code>#if DEBUG</code> compiler directives that were the default when SwiftUI was brand new (back then, it was because the compiler wasn’t quite so good at optimizing them out of release builds). Alternatively, you could surround them with <code>#if !TESTING</code>. Either way, it’s important to make sure you have at least one application level test (like an XCUITest) that ensures you can’t use these compiler directives to exclude any production code without your test build failing.</p><p>For example:</p><pre><code>#if DEBUG
+struct RestartOverlay_Previews: PreviewProvider {
+    static var previews: some View {
+        Group {
+            RestartOverlay(gameEnd: .draw, restart: {})
+                .border(Color.orange, width: 2)
+            RestartOverlay(gameEnd: .winner(.o), restart: {})
+                .border(Color.orange, width: 2)
+            RestartOverlay(gameEnd: .winner(.x), restart: {})
+                .border(Color.orange, width: 2)
+        }
+    }
+}
+#endif
+</code></pre><p>Thanks for reading, I hope this was helpful and informative.</p>]]></content:encoded></item></channel></rss>
