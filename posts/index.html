@@ -46,4 +46,67 @@ vc.<span class="property">delegate</span> = delegate
             self</span>?.<span class="property">delegate</span>?.<span class="call">delegateMethod</span>()
         }.<span class="call">resume</span>()
     }
-</code></pre></div></article></div></li></ul></div><footer><p>Generated using <a href="https://github.com/johnsundell/publish">Publish</a></p><p><a href="/feed.rss">RSS feed</a></p></footer></body></html>
+</code></pre></div></article></div></li><li><div class="wrapper"><a href="/posts/weak_in_protocol_extensions"><h1>Tip: How To weakly reference self in protocol extensions that are not class-bound</h1></a><ul class="tag-list"><li><a href="/tags/tip">Tip</a></li><li><a href="/tags/swift">Swift</a></li></ul><article><div class="preview_content"><h1>Tip: How To weakly reference <code>self</code> in protocol extensions that are not class-bound</h1><p>As any iOS developer can tell you, it's often important to use <code>weak</code> in closures to break refernce cycles and avoid memory leaks. Unfortunately, using <code>weak</code> is not always directly possible in protocol extensions that are not class-bound. Suppose you have a protocol for an API client to fetch some information:</p><pre><code><span class="keyword">protocol</span> APIClient {
+    <span class="keyword">func</span> fetchData() <span class="keyword">async throws</span> -&gt; <span class="type">Data</span>
+}
+</code></pre><p>Unfortunately, not all of your code is ready to rely on async/await exclusively for concurrency so you may want to also expose a <code>Combine</code> compatible interface:</p><pre><code><span class="keyword">protocol</span> APIClient {
+    <span class="keyword">func</span> fetchData() <span class="keyword">async throws</span> -&gt; <span class="type">Data</span>
+    <span class="keyword">func</span> fetchDataPublisher() -&gt; <span class="type">Future</span>&lt;<span class="type">Data</span>, <span class="type">Error</span>&gt;
+}
+</code></pre><p>At a glance, it's obvious these two protocol requirements are redundant and conforming types shouldn't have to provide two implementations to solve the same problem. We can solve this by providing a default implementation of the <code>Combine</code> interface:</p><pre><code><span class="keyword">extension</span> <span class="type">APIClient</span> {
+    <span class="keyword">func</span> fetchDataPublisher() -&gt; <span class="type">Future</span>&lt;<span class="type">Data</span>, <span class="type">Error</span>&gt; {
+        <span class="keyword">return</span> <span class="type">Future</span> { promise <span class="keyword">in</span>
+            <span class="type">Task</span> {
+                <span class="keyword">do</span> {
+                    <span class="keyword">let</span> data = <span class="keyword">try await</span> <span class="call">fetchData</span>()
+                    <span class="call">promise</span>(.<span class="call">success</span>(data))
+                } <span class="keyword">catch</span> {
+                    <span class="call">promise</span>(.<span class="call">failure</span>(error))
+                }
+            }
+        }
+    }
+}
+</code></pre><p>Unfortunately, the above may cause unexpected behavior. Even if implementations of <code>APIClient</code> choose to implement <code>fetchData</code> in a way that does not strongly reference <code>self</code>, the <code>Combine</code> compatible implementation will still retain <code>self</code> for the lifetime of the API call.</p><p>Unfortunately, it's not possible to simply add <code>[weak self]</code> into the closure because we cannot guarantee that <code>self</code> is a reference type that can be referenced weakly. Instead we get a build error suggesting we limit the protocol to a class:</p><pre><code>'<span class="keyword">weak</span>' must not be applied to non-<span class="keyword">class</span>-bound '<span class="type">Self</span>'; consider adding a <span class="keyword">protocol</span> conformance that has a <span class="keyword">class</span> bound
+</code></pre><p>While this may be a perfectly good general solution, it's not a good solution here. There's no fundamental difference in the logic we want to use for reference types vs value types. So we need a workaround to weakly reference classes that won't cause errors value types.</p><p>Fortunately, the solution is quite simple:</p><pre><code><span class="keyword">struct</span> WeakBox&lt;T&gt; {
+    <span class="keyword">var</span> object: <span class="type">T</span>? {
+        <span class="keyword">get</span> { storage <span class="keyword">as</span>? <span class="type">T</span> }
+        <span class="keyword">set</span> { storage = newValue <span class="keyword">as</span> <span class="type">AnyObject</span> }
+    }
+    <span class="keyword">weak private var</span> storage: <span class="type">AnyObject</span>?
+    
+    <span class="keyword">init</span>(<span class="keyword">_</span> stored: <span class="type">T</span>) {
+        <span class="keyword">self</span>.<span class="property">object</span> = stored
+    }
+}
+</code></pre><p><code>WeakBox</code> casts the stored value to <code>AnyObject</code> so we can always use reference semantics, even if the provided object is actually a value type. (We can unconditionally cast <code>as AnyObject</code> because of the some <a href="https://forums.swift.org/t/value-type-is-anyobject-why/15290/2">Objective C interoperability requirements</a>.)<br><br>Fortunately, the casting a value type as <code>AnyObject</code> does not cause it to be deallocated, as proved by the following pair of unit tests.</p><pre><code><span class="keyword">final class</span> WeakCaptureTests: <span class="type">XCTestCase</span> {
+    <span class="keyword">func</span> test_doesNotRetainClass() <span class="keyword">throws</span> {
+        <span class="keyword">class</span> Example {}
+        <span class="keyword">let</span> subject = <span class="type">WeakBox</span>(<span class="type">Example</span>())
+        <span class="call">XCTAssertNil</span>(subject.<span class="property">object</span>)
+    }
+    
+    <span class="keyword">func</span> test_doesRetainStructs() <span class="keyword">throws</span> {
+        <span class="keyword">let</span> subject = <span class="type">WeakBox</span>(<span class="number">42</span>)
+        <span class="call">XCTAssertEqual</span>(subject.<span class="property">object</span>, <span class="number">42</span>)
+    }
+}
+</code></pre><p><code>WeakBox</code> allows us to appropriately leave the decision of whether or not to retain <code>self</code> up to implementations of <code>APIClient</code> rather than our default implementation without duplicating the implementation or restricting it to <code>AnyObject</code>:</p><pre><code><span class="keyword">struct</span> APIClientDeallocated: <span class="type">Error</span> {}
+<span class="keyword">extension</span> <span class="type">APIClient</span> {
+    <span class="keyword">func</span> fetchDataPublisher() -&gt; <span class="type">Future</span>&lt;<span class="type">Data</span>, <span class="type">Error</span>&gt; {
+        <span class="keyword">let</span> weakReference = <span class="type">WeakBox</span>(<span class="keyword">self</span>)
+        <span class="keyword">return</span> <span class="type">Future</span> {  promise <span class="keyword">in</span>
+            <span class="type">Task</span> {
+                <span class="keyword">do</span> {
+                    <span class="keyword">guard let</span> data = <span class="keyword">try await</span> weakReference.<span class="property">object</span>?.<span class="call">fetchData</span>() <span class="keyword">else</span> {
+                        <span class="keyword">throw</span> <span class="type">APIClientDeallocated</span>()
+                    }
+                    <span class="call">promise</span>(.<span class="call">success</span>(data))
+                } <span class="keyword">catch</span> {
+                    <span class="call">promise</span>(.<span class="call">failure</span>(error))
+                }
+            }
+        }
+    }
+}
+</code></pre><p>Hopefully this has been interesting and useful. Please feel free to reach out on <a href="https://www.linkedin.com/in/christopherthiebaut/">LinkedIn</a> if you have any questions or comments.</p></div></article></div></li></ul></div><footer><p>Generated using <a href="https://github.com/johnsundell/publish">Publish</a></p><p><a href="/feed.rss">RSS feed</a></p></footer></body></html>

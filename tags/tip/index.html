@@ -1,4 +1,67 @@
-<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="og:site_name" content="christopherthiebaut.com"/><link rel="canonical" href="http://christopherthiebaut.com/tags/tip"/><meta name="twitter:url" content="http://christopherthiebaut.com/tags/tip"/><meta name="og:url" content="http://christopherthiebaut.com/tags/tip"/><title>christopherthiebaut.com</title><meta name="twitter:title" content="christopherthiebaut.com"/><meta name="og:title" content="christopherthiebaut.com"/><meta name="description" content="Chris Thiebaut's blog"/><meta name="twitter:description" content="Chris Thiebaut's blog"/><meta name="og:description" content="Chris Thiebaut's blog"/><meta name="twitter:card" content="summary"/><link rel="stylesheet" href="/styles.css" type="text/css"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><link rel="shortcut icon" href="/images/favicon.png" type="image/png"/><link rel="alternate" href="/feed.rss" type="application/rss+xml" title="Subscribe to christopherthiebaut.com"/></head><body><header><div class="wrapper"><a class="site-name" href="/">christopherthiebaut.com</a><nav><ul><li><a href="/posts">Posts</a></li><li><a href="/about">About</a></li></ul></nav></div></header><div class="wrapper"><h1>Tagged with <span class="tag">Tip</span></h1><a class="browse-all" href="/tags">Browse all tags</a><ul class="item-list"><li><div class="wrapper"><a href="/posts/weak_delegate_capture_list_gotcha"><h1>Tip: How to avoid unexpected behavior when capturing Optionals</h1></a><ul class="tag-list"><li><a href="/tags/tip">Tip</a></li><li><a href="/tags/swift">Swift</a></li><li><a href="/tags/laungage-features">Laungage Features</a></li></ul><article><div class="preview_content"><h1>Tip: How to avoid unexpected behavior when capturing <code>Optional</code>s</h1><p>Swift's <code>Optional</code> type is one of the defining features of the language. Given the amount of language features and syntactic sugar that are built around <code>Optional</code>, it is easy to forget that there even is such a type.<br><br>Normally, it's a good thing for a language feature to get out of your way. But when it comes to closure capture lists, it's important to remember that an optional is a value type regardless of what the wrapped type is.</p><p>Consider the following example code:</p><pre><code><span class="keyword">class</span> ExampleViewController: <span class="type">UIViewController</span> {
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="og:site_name" content="christopherthiebaut.com"/><link rel="canonical" href="http://christopherthiebaut.com/tags/tip"/><meta name="twitter:url" content="http://christopherthiebaut.com/tags/tip"/><meta name="og:url" content="http://christopherthiebaut.com/tags/tip"/><title>christopherthiebaut.com</title><meta name="twitter:title" content="christopherthiebaut.com"/><meta name="og:title" content="christopherthiebaut.com"/><meta name="description" content="Chris Thiebaut's blog"/><meta name="twitter:description" content="Chris Thiebaut's blog"/><meta name="og:description" content="Chris Thiebaut's blog"/><meta name="twitter:card" content="summary"/><link rel="stylesheet" href="/styles.css" type="text/css"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><link rel="shortcut icon" href="/images/favicon.png" type="image/png"/><link rel="alternate" href="/feed.rss" type="application/rss+xml" title="Subscribe to christopherthiebaut.com"/></head><body><header><div class="wrapper"><a class="site-name" href="/">christopherthiebaut.com</a><nav><ul><li><a href="/posts">Posts</a></li><li><a href="/about">About</a></li></ul></nav></div></header><div class="wrapper"><h1>Tagged with <span class="tag">Tip</span></h1><a class="browse-all" href="/tags">Browse all tags</a><ul class="item-list"><li><div class="wrapper"><a href="/posts/weak_in_protocol_extensions"><h1>Tip: How To weakly reference self in protocol extensions that are not class-bound</h1></a><ul class="tag-list"><li><a href="/tags/tip">Tip</a></li><li><a href="/tags/swift">Swift</a></li></ul><article><div class="preview_content"><h1>Tip: How To weakly reference <code>self</code> in protocol extensions that are not class-bound</h1><p>As any iOS developer can tell you, it's often important to use <code>weak</code> in closures to break refernce cycles and avoid memory leaks. Unfortunately, using <code>weak</code> is not always directly possible in protocol extensions that are not class-bound. Suppose you have a protocol for an API client to fetch some information:</p><pre><code><span class="keyword">protocol</span> APIClient {
+    <span class="keyword">func</span> fetchData() <span class="keyword">async throws</span> -&gt; <span class="type">Data</span>
+}
+</code></pre><p>Unfortunately, not all of your code is ready to rely on async/await exclusively for concurrency so you may want to also expose a <code>Combine</code> compatible interface:</p><pre><code><span class="keyword">protocol</span> APIClient {
+    <span class="keyword">func</span> fetchData() <span class="keyword">async throws</span> -&gt; <span class="type">Data</span>
+    <span class="keyword">func</span> fetchDataPublisher() -&gt; <span class="type">Future</span>&lt;<span class="type">Data</span>, <span class="type">Error</span>&gt;
+}
+</code></pre><p>At a glance, it's obvious these two protocol requirements are redundant and conforming types shouldn't have to provide two implementations to solve the same problem. We can solve this by providing a default implementation of the <code>Combine</code> interface:</p><pre><code><span class="keyword">extension</span> <span class="type">APIClient</span> {
+    <span class="keyword">func</span> fetchDataPublisher() -&gt; <span class="type">Future</span>&lt;<span class="type">Data</span>, <span class="type">Error</span>&gt; {
+        <span class="keyword">return</span> <span class="type">Future</span> { promise <span class="keyword">in</span>
+            <span class="type">Task</span> {
+                <span class="keyword">do</span> {
+                    <span class="keyword">let</span> data = <span class="keyword">try await</span> <span class="call">fetchData</span>()
+                    <span class="call">promise</span>(.<span class="call">success</span>(data))
+                } <span class="keyword">catch</span> {
+                    <span class="call">promise</span>(.<span class="call">failure</span>(error))
+                }
+            }
+        }
+    }
+}
+</code></pre><p>Unfortunately, the above may cause unexpected behavior. Even if implementations of <code>APIClient</code> choose to implement <code>fetchData</code> in a way that does not strongly reference <code>self</code>, the <code>Combine</code> compatible implementation will still retain <code>self</code> for the lifetime of the API call.</p><p>Unfortunately, it's not possible to simply add <code>[weak self]</code> into the closure because we cannot guarantee that <code>self</code> is a reference type that can be referenced weakly. Instead we get a build error suggesting we limit the protocol to a class:</p><pre><code>'<span class="keyword">weak</span>' must not be applied to non-<span class="keyword">class</span>-bound '<span class="type">Self</span>'; consider adding a <span class="keyword">protocol</span> conformance that has a <span class="keyword">class</span> bound
+</code></pre><p>While this may be a perfectly good general solution, it's not a good solution here. There's no fundamental difference in the logic we want to use for reference types vs value types. So we need a workaround to weakly reference classes that won't cause errors value types.</p><p>Fortunately, the solution is quite simple:</p><pre><code><span class="keyword">struct</span> WeakBox&lt;T&gt; {
+    <span class="keyword">var</span> object: <span class="type">T</span>? {
+        <span class="keyword">get</span> { storage <span class="keyword">as</span>? <span class="type">T</span> }
+        <span class="keyword">set</span> { storage = newValue <span class="keyword">as</span> <span class="type">AnyObject</span> }
+    }
+    <span class="keyword">weak private var</span> storage: <span class="type">AnyObject</span>?
+    
+    <span class="keyword">init</span>(<span class="keyword">_</span> stored: <span class="type">T</span>) {
+        <span class="keyword">self</span>.<span class="property">object</span> = stored
+    }
+}
+</code></pre><p><code>WeakBox</code> casts the stored value to <code>AnyObject</code> so we can always use reference semantics, even if the provided object is actually a value type. (We can unconditionally cast <code>as AnyObject</code> because of the some <a href="https://forums.swift.org/t/value-type-is-anyobject-why/15290/2">Objective C interoperability requirements</a>.)<br><br>Fortunately, the casting a value type as <code>AnyObject</code> does not cause it to be deallocated, as proved by the following pair of unit tests.</p><pre><code><span class="keyword">final class</span> WeakCaptureTests: <span class="type">XCTestCase</span> {
+    <span class="keyword">func</span> test_doesNotRetainClass() <span class="keyword">throws</span> {
+        <span class="keyword">class</span> Example {}
+        <span class="keyword">let</span> subject = <span class="type">WeakBox</span>(<span class="type">Example</span>())
+        <span class="call">XCTAssertNil</span>(subject.<span class="property">object</span>)
+    }
+    
+    <span class="keyword">func</span> test_doesRetainStructs() <span class="keyword">throws</span> {
+        <span class="keyword">let</span> subject = <span class="type">WeakBox</span>(<span class="number">42</span>)
+        <span class="call">XCTAssertEqual</span>(subject.<span class="property">object</span>, <span class="number">42</span>)
+    }
+}
+</code></pre><p><code>WeakBox</code> allows us to appropriately leave the decision of whether or not to retain <code>self</code> up to implementations of <code>APIClient</code> rather than our default implementation without duplicating the implementation or restricting it to <code>AnyObject</code>:</p><pre><code><span class="keyword">struct</span> APIClientDeallocated: <span class="type">Error</span> {}
+<span class="keyword">extension</span> <span class="type">APIClient</span> {
+    <span class="keyword">func</span> fetchDataPublisher() -&gt; <span class="type">Future</span>&lt;<span class="type">Data</span>, <span class="type">Error</span>&gt; {
+        <span class="keyword">let</span> weakReference = <span class="type">WeakBox</span>(<span class="keyword">self</span>)
+        <span class="keyword">return</span> <span class="type">Future</span> {  promise <span class="keyword">in</span>
+            <span class="type">Task</span> {
+                <span class="keyword">do</span> {
+                    <span class="keyword">guard let</span> data = <span class="keyword">try await</span> weakReference.<span class="property">object</span>?.<span class="call">fetchData</span>() <span class="keyword">else</span> {
+                        <span class="keyword">throw</span> <span class="type">APIClientDeallocated</span>()
+                    }
+                    <span class="call">promise</span>(.<span class="call">success</span>(data))
+                } <span class="keyword">catch</span> {
+                    <span class="call">promise</span>(.<span class="call">failure</span>(error))
+                }
+            }
+        }
+    }
+}
+</code></pre><p>Hopefully this has been interesting and useful. Please feel free to reach out on <a href="https://www.linkedin.com/in/christopherthiebaut/">LinkedIn</a> if you have any questions or comments.</p></div></article></div></li><li><div class="wrapper"><a href="/posts/weak_delegate_capture_list_gotcha"><h1>Tip: How to avoid unexpected behavior when capturing Optionals</h1></a><ul class="tag-list"><li><a href="/tags/tip">Tip</a></li><li><a href="/tags/swift">Swift</a></li><li><a href="/tags/laungage-features">Laungage Features</a></li></ul><article><div class="preview_content"><h1>Tip: How to avoid unexpected behavior when capturing <code>Optional</code>s</h1><p>Swift's <code>Optional</code> type is one of the defining features of the language. Given the amount of language features and syntactic sugar that are built around <code>Optional</code>, it is easy to forget that there even is such a type.<br><br>Normally, it's a good thing for a language feature to get out of your way. But when it comes to closure capture lists, it's important to remember that an optional is a value type regardless of what the wrapped type is.</p><p>Consider the following example code:</p><pre><code><span class="keyword">class</span> ExampleViewController: <span class="type">UIViewController</span> {
     <span class="keyword">weak var</span> delegate: <span class="type">ExampleViewControllerDelegate</span>?
 }
 </code></pre><p>It is easy to look at the above code and think of <code>delegate</code> as being an <code>ExampleViewControllerDelegate</code> which may or may not be present. But that thinking will lead you astray if you try to need to use an optional in a closure capture list. Expanding on the previous example (assuming it was executed in a Playground):</p><pre><code><span class="keyword">class</span> ExampleViewControllerDelegate {
