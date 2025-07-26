@@ -12,7 +12,42 @@
     }
 }
 <span class="preprocessing">#endif</span>
-</code></pre><p>Thanks for reading, I hope this was helpful and informative.</p></div></article></div></li><li><div class="wrapper"><a href="/posts/weak_delegate_capture_list_gotcha"><h1>Tip: How to avoid unexpected behavior when capturing Optionals</h1></a><ul class="tag-list"><li><a href="/tags/tip">Tip</a></li><li><a href="/tags/swift">Swift</a></li><li><a href="/tags/laungage-features">Laungage Features</a></li></ul><article><div class="preview_content"><h1>Tip: How to avoid unexpected behavior when capturing <code>Optional</code>s</h1><p>Swift's <code>Optional</code> type is one of the defining features of the language. Given the amount of language features and syntactic sugar that are built around <code>Optional</code>, it is easy to forget that there even is such a type.<br><br>Normally, it's a good thing for a language feature to get out of your way. But when it comes to closure capture lists, it's important to remember that an optional is a value type regardless of what the wrapped type is.</p><p>Consider the following example code:</p><pre><code><span class="keyword">class</span> ExampleViewController: <span class="type">UIViewController</span> {
+</code></pre><p>Thanks for reading, I hope this was helpful and informative.</p></div></article></div></li><li><div class="wrapper"><a href="/posts/testing_unknown_default_switch_cases"><h1>How to unit test @unknown default switch cases in Swift</h1></a><ul class="tag-list"><li><a href="/tags/swift">Swift</a></li><li><a href="/tags/testing">Testing</a></li></ul><article><div class="preview_content"><h1>How to unit test <code>@unknown default</code> switch cases in Swift</h1><p>TLDR: Use pointers to instantiate an invalid instance of the enum</p><h2>The problem</h2><p>When writing a <code>switch</code> statement over a non-final enum in Swift, covering all known cases is not enough to guarantee exhaustivity. If you only cover known cases, the compiler will emit a warning.</p><pre><code><span class="type">Switch</span> covers known cases, but '<span class="type">UNAuthorizationStatus</span>' may have additional unknown values, possibly added <span class="keyword">in</span> future versions; this <span class="keyword">is</span> an error <span class="keyword">in</span> the <span class="type">Swift</span> <span class="number">6</span> language mode
+</code></pre><p>This is important because when you ship your app to customers, it could run on a future version of iOS that has additional cases you need to handle.</p><p>In order to sepcify how your app should handle future cases that may be added to the enum, you use an <code>@unknown default</code> case.</p><pre><code><span class="keyword">func</span> notificationStatus(<span class="keyword">_</span> permission: <span class="type">UNAuthorizationStatus</span>) -&gt; <span class="type">String</span> {
+    <span class="keyword">switch</span> permission {
+    <span class="keyword">case</span> .<span class="dotAccess">authorized</span>:
+        <span class="keyword">return</span> <span class="string">"authorized"</span>
+    <span class="keyword">case</span> .<span class="dotAccess">denied</span>:
+        <span class="keyword">return</span> <span class="string">"denied"</span>
+    <span class="keyword">case</span> .<span class="dotAccess">notDetermined</span>:
+        <span class="keyword">return</span> <span class="string">"not determined"</span>
+    <span class="keyword">case</span> .<span class="dotAccess">provisional</span>:
+        <span class="keyword">return</span> <span class="string">"provisional"</span>
+    <span class="keyword">case</span> .<span class="dotAccess">ephemeral</span>:
+        <span class="keyword">return</span> <span class="string">"ephemeral"</span>
+    <span class="keyword">@unknown default</span>:
+        <span class="keyword">return</span> <span class="string">"unknown case"</span>
+    }
+}
+</code></pre><p>In principle, this is a great way to ensure that your app has clearly defined behavior against future OS versions. However, it leaves developers with a problem to solve.</p><p>If it is important to specifify how your app should behave when it encounters an unknown enum case, your unit tests should cover that behavior as well. But in principle, testing how your app handles enum cases that do not exist requires you to instantiate enum cases that don't exist.</p><h2>The solution</h2><p>While it sounds impossible to create an instance of an enum outside of the defined cases, it turns out it's very possible if the enum in question has a raw value that we can instantiate.</p><pre><code><span class="preprocessing">#if DEBUG</span>
+<span class="keyword">extension</span> <span class="type">UNAuthorizationStatus</span> {
+    <span class="comment">// It is important to ensure this extension is not used in release builds</span>
+    <span class="keyword">static var</span> unknownForTesting: <span class="type">UNAuthorizationStatus</span> {
+        <span class="keyword">let</span> raw = <span class="number">999</span> <span class="comment">// Choose a value that doesn't correspond to the raw value of an existing enum case</span>
+        <span class="keyword">let</span> pointer = <span class="type">UnsafeMutablePointer</span>&lt;<span class="type">Int</span>&gt;.<span class="call">allocate</span>(capacity: <span class="number">1</span>)
+        pointer.<span class="property">pointee</span> = raw
+        <span class="keyword">defer</span> { pointer.<span class="call">deallocate</span>() }
+        <span class="keyword">return</span> pointer.<span class="call">withMemoryRebound</span>(to: <span class="type">UNAuthorizationStatus</span>.<span class="keyword">self</span>, capacity: <span class="number">1</span>) { $0.<span class="property">pointee</span> }
+    }
+}
+<span class="preprocessing">#endif</span>
+</code></pre><p>If we create a raw value that doesn't correspond to any known case of our enum and assign it as the value of a pointer, then we can get an undefined instance of the enum for testing by rebinding the memory to our enum type.</p><p>Once we have access to an undefined instance of our enum, we can pass it to the function under test just like any other enum value.</p><pre><code><span class="keyword">struct</span> UnitTestDefaultCasesTests {
+    <span class="keyword">@Test func</span> example() <span class="keyword">async throws</span> {
+        <span class="keyword">let</span> unknownAuthStatus = <span class="type">UNAuthorizationStatus</span>.<span class="property">unknownForTesting</span>
+        #expect(<span class="call">notificationStatus</span>(unknownAuthStatus) == <span class="string">"unknown case"</span>)
+    }
+}
+</code></pre></div></article></div></li><li><div class="wrapper"><a href="/posts/weak_delegate_capture_list_gotcha"><h1>Tip: How to avoid unexpected behavior when capturing Optionals</h1></a><ul class="tag-list"><li><a href="/tags/tip">Tip</a></li><li><a href="/tags/swift">Swift</a></li><li><a href="/tags/laungage-features">Laungage Features</a></li></ul><article><div class="preview_content"><h1>Tip: How to avoid unexpected behavior when capturing <code>Optional</code>s</h1><p>Swift's <code>Optional</code> type is one of the defining features of the language. Given the amount of language features and syntactic sugar that are built around <code>Optional</code>, it is easy to forget that there even is such a type.<br><br>Normally, it's a good thing for a language feature to get out of your way. But when it comes to closure capture lists, it's important to remember that an optional is a value type regardless of what the wrapped type is.</p><p>Consider the following example code:</p><pre><code><span class="keyword">class</span> ExampleViewController: <span class="type">UIViewController</span> {
     <span class="keyword">weak var</span> delegate: <span class="type">ExampleViewControllerDelegate</span>?
 }
 </code></pre><p>It is easy to look at the above code and think of <code>delegate</code> as being an <code>ExampleViewControllerDelegate</code> which may or may not be present. But that thinking will lead you astray if you try to need to use an optional in a closure capture list. Expanding on the previous example (assuming it was executed in a Playground):</p><pre><code><span class="keyword">class</span> ExampleViewControllerDelegate {
